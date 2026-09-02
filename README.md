@@ -8,8 +8,8 @@
 
 Imports an Ivanti Connect Secure (ICS) configuration export into a Netskope
 tenant with Private Access (NPA/ZTNA) enabled — converting ICS resource
-profiles and Network Connect ACLs into Netskope Private Apps, and ICS roles
-into NPA Real-Time Policies.
+profiles and Network Connect ACLs into Netskope Private Apps, and generating
+one NPA Real-Time Policy per app/server group, scoped to its role(s).
 
 ## What it does
 
@@ -19,8 +19,11 @@ into NPA Real-Time Policies.
 2. Maps each supported resource into a Netskope **Private App**
    (host + protocol/port), always **Client-based** — Browser Access isn't
    supported by this tool.
-3. Maps each ICS role to an NPA **Real-Time Policy** scoping the apps that
-   role can reach.
+3. Generates one NPA **Real-Time Policy per app/server** (one resource
+   profile, or one Network Connect ACL) — not per role — scoped to every
+   role attached to that profile/ACL, so a policy's name and scope stay
+   tied to the thing it protects instead of bundling many unrelated apps
+   under one role-named policy.
 4. Writes a human-readable analysis report (`analysis_report.md`/`.csv`)
    and a machine-readable `plan.json` — generated on every run, including
    `--analysis-only` (no credentials needed).

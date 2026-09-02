@@ -23,6 +23,20 @@ guessed:
    starting point — you must confirm that name matches (or remap it to)
    a real group in your IdP before trusting the policy.
 
+   Policies are generated ONE PER APP/SERVER GROUP (one resource profile,
+   or one Network Connect ACL), not one per role. Each policy's rule_name
+   is derived from that profile/ACL's (sanitized) name, and its userGroups
+   is the full list of role(s) attached to that profile/ACL. Before this,
+   policies were grouped by role instead -- one role with access to many
+   unrelated apps/ACLs produced a single large policy naming all of them,
+   which obscured which app/server the policy was actually about and
+   meant a role attached to N profiles/ACLs needed N nearly-identical
+   role-named policies if any of those apps were also shared with other
+   roles. Grouping by app/server instead keeps a policy's name and scope
+   tied to the thing it protects; multiple roles on the same profile/ACL
+   still collapse into ONE policy (userGroups is a list), so this doesn't
+   multiply policy count for the common multi-role-per-app case.
+
 3. Network Connect ACLs (full-tunnel, subnet/CIDR-based access rules) are
    converted -- one Private App PER RESOURCE, since an NPA app is one
    host and a real ACL's resources turn out to be overwhelmingly
@@ -31,7 +45,7 @@ guessed:
    were CIDR blocks, none broader than Netskope's documented /8 floor).
    A multi-resource ACL becomes multiple numbered apps
    ("<acl-name>-1", "<acl-name>-2", ...) all granted by the same
-   role-based policy. A CIDR resource broader than /8, or exactly
+   ACL-named policy (see point 2 above). A CIDR resource broader than /8, or exactly
    "0/0"/"::"-style any-address, is skipped and warned about rather than
    sent (Netskope explicitly disallows these). See
    _protocols_for_resource() and the Network Connect ACL section of
@@ -444,9 +458,6 @@ def build_migration_plan(
     publisher_overrides = publisher_overrides or {}
     plan = MigrationPlan(warnings=list(ivanti_config.warnings))
 
-    # role -> [app_name, ...], built while walking profiles
-    role_to_apps: dict[str, list[str]] = {}
-
     for profile in ivanti_config.resource_profiles:
         if not profile.supported:
             plan.skipped_profiles.append(profile.name)
@@ -539,8 +550,34 @@ def build_migration_plan(
         )
         plan.private_apps.append(app_plan)
 
-        for role in profile.roles:
-            role_to_apps.setdefault(role, []).append(app_name)
+        # One ALLOW policy per app/server group (this profile), not per
+        # role -- see module docstring point 2. Every role attached to
+        # this profile lands in the SAME policy's userGroups list.
+        if profile.roles:
+            plan.policies.append(
+                NpaPolicyPlan(
+                    rule_name=f"ivanti-import-{app_name}",
+                    private_app_names=[app_name],
+                    user_groups=list(profile.roles),
+                    description=(
+                        f"Auto-generated from Ivanti Connect Secure resource profile "
+                        f"'{profile.name}', granting role(s) {', '.join(profile.roles)}. "
+                        "Verify 'userGroups' matches real IdP group(s) before relying on "
+                        f"this policy. Imported {imported_at_str}."
+                    ),
+                )
+            )
+            plan.warnings.append(
+                f"Policy 'ivanti-import-{app_name}' uses userGroups={list(profile.roles)!r} "
+                f"taken directly from Ivanti role name(s) on resource profile '{profile.name}'. "
+                "Confirm these match actual group name(s) synced into Netskope from your IdP "
+                "— otherwise the policy will match nobody."
+            )
+        else:
+            plan.warnings.append(
+                f"Resource profile '{profile.name}' has no roles attached -- its private "
+                "app was created but no policy grants access to it yet. Review manually."
+            )
 
     # --- Network Connect ACLs -------------------------------------------
     # See module docstring point 3 and NetworkConnectAcl's docstring. One
@@ -788,9 +825,33 @@ def build_migration_plan(
                     "generated. Review manually."
                 )
         else:
-            for role in acl.roles:
-                role_to_apps.setdefault(role, []).extend(acl_app_names)
-            if not acl.roles:
+            # One ALLOW policy per ACL (an app/server group), not per role
+            # -- see module docstring point 2. Every role attached to this
+            # ACL lands in the SAME policy's userGroups list, and it grants
+            # ALL of this ACL's private app(s) (including any it shares
+            # with other ACLs via cross-ACL dedup, above).
+            if acl.roles:
+                plan.policies.append(
+                    NpaPolicyPlan(
+                        rule_name=f"ivanti-import-{acl_app_name}",
+                        private_app_names=acl_app_names,
+                        user_groups=list(acl.roles),
+                        description=(
+                            f"Auto-generated from Ivanti Connect Secure Network Connect ACL "
+                            f"'{acl.name}', granting role(s) {', '.join(acl.roles)}. Verify "
+                            "'userGroups' matches real IdP group(s) before relying on this "
+                            f"policy. Imported {imported_at_str}."
+                        ),
+                    )
+                )
+                plan.warnings.append(
+                    f"Policy 'ivanti-import-{acl_app_name}' uses userGroups="
+                    f"{list(acl.roles)!r} taken directly from Ivanti role name(s) on Network "
+                    f"Connect ACL '{acl.name}'. Confirm these match actual group name(s) "
+                    "synced into Netskope from your IdP — otherwise the policy will match "
+                    "nobody."
+                )
+            else:
                 plan.warnings.append(
                     f"Network Connect ACL '{acl.name}' has no roles attached -- its "
                     f"{len(acl_app_names)} private app(s) were created but no policy "
@@ -859,26 +920,6 @@ def build_migration_plan(
             "from your Publishers' own IPs -- review both manually."
         )
         plan.warnings.append(summary)
-
-    for role, app_names in role_to_apps.items():
-        plan.policies.append(
-            NpaPolicyPlan(
-                rule_name=f"ivanti-import-{role}",
-                private_app_names=app_names,
-                user_groups=[role],
-                description=(
-                    f"Auto-generated from Ivanti Connect Secure role '{role}'. "
-                    "Verify 'userGroups' matches a real IdP group before relying "
-                    f"on this policy. Imported {imported_at_str}."
-                ),
-            )
-        )
-        plan.warnings.append(
-            f"Policy 'ivanti-import-{role}' uses userGroups=['{role}'] taken "
-            f"directly from the Ivanti role name '{role}'. Confirm this matches "
-            "an actual group name synced into Netskope from your IdP — "
-            "otherwise the policy will match nobody."
-        )
 
     if not plan.private_apps:
         plan.warnings.append(

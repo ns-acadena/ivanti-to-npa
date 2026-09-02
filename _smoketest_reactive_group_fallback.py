@@ -124,18 +124,22 @@ def test_reproduces_the_reported_failure_sequence_and_recovers():
     assert len(fake._apps) == 9, "all apps should still be created (5 resource-profile + 4 network-connect-acl derived)"
 
     created_names = set(fake._policies.keys())
-    assert "ivanti-import-Employees-Full" in created_names, "the previously-failing policy must still get created"
+    # Policies are grouped by app/server now, not by role -- "Corp-Intranet"
+    # is one of the profiles whose userGroups includes the rejected
+    # "Employees-Full", so its policy must still get created via retry.
+    assert "ivanti-import-Corp-Intranet" in created_names, "the previously-failing policy must still get created"
 
     # It should have been attempted twice: once with userGroups (rejected),
     # once without (accepted).
-    attempts_for_this_rule = [a for a in fake.create_attempts if a["rule_name"] == "ivanti-import-Employees-Full"]
+    attempts_for_this_rule = [a for a in fake.create_attempts if a["rule_name"] == "ivanti-import-Corp-Intranet"]
     assert len(attempts_for_this_rule) == 2, f"expected exactly one retry, got {len(attempts_for_this_rule)} attempts"
     assert "userGroups" in attempts_for_this_rule[0]["rule_data"]
     assert "userGroups" not in attempts_for_this_rule[1]["rule_data"]
 
-    # The other policies (not rejected) should be untouched -- created once,
-    # with their userGroups intact.
-    other_policy = fake._policies["ivanti-import-Employees-Contractors"]
+    # The one policy whose userGroups does NOT include the rejected role
+    # (legacy-telnet-block-block, scoped only to Employees-Contractors)
+    # should be untouched -- created once, with its userGroups intact.
+    other_policy = fake._policies["ivanti-import-legacy-telnet-block-block"]
     assert "userGroups" in other_policy["rule_data"]
     print("PASS: the exact reported failure (404 pre-flight + tenant-rejected group) now self-heals instead of aborting the run")
 

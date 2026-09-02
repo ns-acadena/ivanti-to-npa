@@ -163,9 +163,12 @@ def test_multi_resource_acl_becomes_numbered_apps_under_one_policy():
         "dpu-networks-datacenter-policy-2",
         "dpu-networks-datacenter-policy-3",
     ], f"expected 3 numbered apps, got {names}"
-    pol = next(p for p in plan.policies if p.rule_name == "ivanti-import-nti-role")
+    # Policies are grouped by app/server (one per ACL), not by role -- the
+    # rule_name is derived from the ACL's own name, not "nti-role".
+    pol = next(p for p in plan.policies if p.rule_name == "ivanti-import-dpu-networks-datacenter-policy")
     assert sorted(pol.private_app_names) == names, "one policy should grant all 3 apps from the multi-resource ACL"
-    print("PASS: a multi-resource ACL becomes numbered apps ('-1', '-2', '-3'), all granted by one role policy")
+    assert pol.user_groups == ["nti-role"]
+    print("PASS: a multi-resource ACL becomes numbered apps ('-1', '-2', '-3'), all granted by one ACL-named policy")
 
 
 def test_cidr_resource_within_the_slash_8_floor_is_converted():
@@ -283,10 +286,13 @@ def test_deny_acl_gets_its_own_block_policy_not_merged_into_allow_policies():
     assert block.rule_name == "ivanti-import-denied-acl-block"
     assert block.private_app_names == ["denied-acl"]
     assert block.user_groups == ["shared-role"]
-    # the shared-role allow policy must only carry the allowed app, never the denied one
-    shared_allow = next(p for p in allow_policies if p.rule_name == "ivanti-import-shared-role")
-    assert shared_allow.private_app_names == ["allowed-acl"]
-    print("PASS: a deny-action ACL gets its own BLOCK policy and is never merged into the role's allow policy")
+    # the allowed-acl's own policy must only carry the allowed app, never the denied one
+    # (policies are grouped by ACL/app now, not by role -- "shared-role" is
+    # attached to both ACLs, but each ACL still gets its own policy).
+    allowed_policy = next(p for p in allow_policies if p.rule_name == "ivanti-import-allowed-acl")
+    assert allowed_policy.private_app_names == ["allowed-acl"]
+    assert allowed_policy.user_groups == ["shared-role"]
+    print("PASS: a deny-action ACL gets its own BLOCK policy and is never merged into the allow-ACL's policy")
 
 
 def test_deny_acl_with_no_roles_warns_instead_of_crashing():

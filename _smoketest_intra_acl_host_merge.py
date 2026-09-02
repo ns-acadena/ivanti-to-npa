@@ -131,16 +131,17 @@ def test_single_resource_per_host_is_unaffected():
 
 
 def test_role_and_policy_wiring_unaffected_by_merge():
+    # Policies are grouped by app/server (one per ACL), not by role -- both
+    # roles attached to this ACL land in the SAME policy's userGroups list.
     cfg = _parse([
         _acl_xml("cdmms-ssh-web", ["tcp://10.51.3.130:80,443,22,873", "udp://10.51.3.130:623"], ["role-a", "role-b"]),
     ])
     plan = _build_plan(cfg)
     app = plan.private_apps[0]
-    pol_a = next(p for p in plan.policies if p.user_groups == ["role-a"])
-    pol_b = next(p for p in plan.policies if p.user_groups == ["role-b"])
-    assert app.app_name in pol_a.private_app_names
-    assert app.app_name in pol_b.private_app_names
-    print("PASS: both roles on the ACL are granted the single merged app, exactly as before")
+    pol = next(p for p in plan.policies if p.rule_name == "ivanti-import-cdmms-ssh-web")
+    assert set(pol.user_groups) == {"role-a", "role-b"}
+    assert app.app_name in pol.private_app_names
+    print("PASS: both roles on the ACL are granted the single merged app via one shared policy")
 
 
 def test_deny_acl_also_merges_intra_acl_but_stays_unshared():

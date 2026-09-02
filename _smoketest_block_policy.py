@@ -31,9 +31,13 @@ def test_deny_profile_generates_a_block_policy():
 
 
 def test_allow_policies_unaffected():
+    # Policies are now grouped by app/server (one per resource profile / ACL),
+    # not by role -- sample_ivanti_config.xml has 5 supported resource
+    # profiles + 2 allow-action Network Connect ACLs (vpn-jumpbox01-rdp,
+    # dc-subnet-access) = 7 allow policies.
     plan = build_plan()
     allow_policies = [p for p in plan.policies if p.action == "allow"]
-    assert len(allow_policies) == 3, f"expected the 3 original role-based allow policies untouched, got {len(allow_policies)}"
+    assert len(allow_policies) == 7, f"expected 7 app/server-grouped allow policies untouched, got {len(allow_policies)}"
     for pol in allow_policies:
         assert pol.action == "allow"
     print("PASS: the existing allow policies are unaffected by the new block-policy generation")

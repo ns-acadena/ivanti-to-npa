@@ -108,11 +108,16 @@ def build_skipped_rows(ivanti_config: IvantiConfig, plan: MigrationPlan) -> list
 
 
 def build_policy_rows(plan: MigrationPlan) -> list[dict]:
+    """One row per generated policy. Policies are grouped by app/server
+    (one resource profile or Network Connect ACL), not by role -- a
+    policy's userGroups can list more than one role when multiple roles
+    are attached to that same profile/ACL, so `ivanti_roles` here is the
+    full joined list, not just the first entry."""
     rows = []
     for pol in plan.policies:
         rows.append(
             {
-                "ivanti_role": pol.user_groups[0] if pol.user_groups else "",
+                "ivanti_roles": ", ".join(pol.user_groups),
                 "netskope_policy": pol.rule_name,
                 "apps_granted": ", ".join(pol.private_app_names),
                 "app_count": len(pol.private_app_names),
@@ -170,22 +175,28 @@ def render_markdown(
         lines.append("| _(none)_ | | | | | | | |")
     lines.append("")
 
-    lines.append("## Policy Mapping (Ivanti Role → Netskope NPA Policy)")
+    lines.append("## Policy Mapping (App/Server → Netskope NPA Policy)")
     lines.append("")
-    lines.append("| Ivanti Role | → Netskope Policy | Apps Granted | IdP Group Confirmed? |")
+    lines.append(
+        "One policy per app/server group (a resource profile or a Network Connect ACL), "
+        "not per role — every role attached to that profile/ACL lands in the same "
+        "policy's userGroups list."
+    )
+    lines.append("")
+    lines.append("| → Netskope Policy | Ivanti Role(s) | Apps Granted | IdP Group Confirmed? |")
     lines.append("|---|---|---|---|")
     for r in policy_rows:
         lines.append(
-            f"| {r['ivanti_role']} | {r['netskope_policy']} | {r['apps_granted']} ({r['app_count']}) | "
+            f"| {r['netskope_policy']} | {r['ivanti_roles']} | {r['apps_granted']} ({r['app_count']}) | "
             f"{r['idp_group_verified']} |"
         )
     if not policy_rows:
-        lines.append("| _(none)_ | | | |")
+        lines.append("| | _(none)_ | | |")
     lines.append("")
     lines.append(
         "> Netskope Private Access policies scope users by **IdP group name**, not by "
-        "Ivanti role. Every row above uses the raw Ivanti role name as a placeholder "
-        "group name — check each one against your actual SSO/SCIM groups before "
+        "Ivanti role. Every row above uses the raw Ivanti role name(s) as placeholder "
+        "group name(s) — check each one against your actual SSO/SCIM groups before "
         "trusting these policies."
     )
     lines.append("")
