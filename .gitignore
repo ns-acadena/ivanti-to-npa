@@ -1,0 +1,18 @@
+# Real Ivanti config exports and anything derived from one -- never commit
+# real tenant data. sample_ivanti_config.xml is the one intentional
+# exception (a synthetic fixture, not a real export).
+*.xml
+!sample_ivanti_config.xml
+
+# Generated run artifacts
+plan.json
+analysis_report.md
+analysis_report.csv
+run_logs/
+netskope_snapshots/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

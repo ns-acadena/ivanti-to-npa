@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SAMPLE / TEMPLATE FILE — not a real Ivanti export.
+
+  This illustrates the element structure ivanti_parser.py expects, based on
+  Ivanti's documented admin-console data model (User Realms -> Roles ->
+  Resource Profiles -> Autopolicies), PLUS a Network Connect ACLs section
+  (Users > Resource Policies > Network Connect) confirmed against a real
+  operator-provided export — see the network-connect-acls block below for
+  the single-resource, multi-resource, and deny-action shapes it converts.
+  Use it to test the tool end-to-end.
+
+  When you have a real "Universal Export" XML from your ICS appliance,
+  open it, find the equivalent tags (they may differ), and update the
+  XPATHS dictionary at the top of ivanti_parser.py to match — the rest of
+  the pipeline (mapper.py, main.py) does not need to change. Note: a real
+  export also declares a firmware-versioned XML namespace that this sample
+  deliberately omits for readability — the parser strips namespaces
+  automatically, so this doesn't need to be reproduced here to be a valid
+  test.
+-->
+<connect-secure-config version="22.7R2">
+
+  <user-realms>
+    <realm name="Employees-Realm">
+      <role-mapping-rules>
+        <rule role="Employees-Full"/>
+        <rule role="Employees-Contractors"/>
+      </role-mapping-rules>
+    </realm>
+    <realm name="Partners-Realm">
+      <role-mapping-rules>
+        <rule role="Partner-LimitedAccess"/>
+      </role-mapping-rules>
+    </realm>
+  </user-realms>
+
+  <resource-profiles>
+
+    <resource-profile name="Corp-Intranet" type="web">
+      <resource>https://intranet.corp.example.com</resource>
+      <autopolicies>
+        <policy action="allow">
+          <resource>https://intranet.corp.example.com:443/*</resource>
+        </policy>
+      </autopolicies>
+      <roles>
+        <role name="Employees-Full"/>
+        <role name="Employees-Contractors"/>
+      </roles>
+    </resource-profile>
+
+    <resource-profile name="SSH-Bastion" type="sam">
+      <resource>10.20.5.10:22</resource>
+      <autopolicies>
+        <policy action="allow">
+          <resource>10.20.5.10:22</resource>
+        </policy>
+      </autopolicies>
+      <roles>
+        <role name="Employees-Full"/>
+      </roles>
+    </resource-profile>
+
+    <resource-profile name="Finance-App-DB" type="psam">
+      <resource>10.20.8.0/24:5432</resource>
+      <autopolicies>
+        <policy action="allow">
+          <resource>10.20.8.0/24:5432</resource>
+        </policy>
+        <policy action="deny">
+          <resource>10.20.8.99:5432</resource>
+        </policy>
+      </autopolicies>
+      <roles>
+        <role name="Employees-Full"/>
+      </roles>
+    </resource-profile>
+
+    <resource-profile name="Windows-RDP-Farm" type="terminal">
+      <resource>10.20.9.15:3389</resource>
+      <autopolicies>
+        <policy action="allow">
+          <resource>10.20.9.15:3389</resource>
+        </policy>
+      </autopolicies>
+      <roles>
+        <role name="Employees-Full"/>
+        <role name="Partner-LimitedAccess"/>
+      </roles>
+    </resource-profile>
+
+    <resource-profile name="File-Share-Sales" type="file">
+      <resource>fileserver.corp.example.com:445</resource>
+      <autopolicies>
+        <policy action="allow">
+          <resource>fileserver.corp.example.com:445/sales/*</resource>
+        </policy>
+      </autopolicies>
+      <roles>
+        <role name="Employees-Full"/>
+      </roles>
+    </resource-profile>
+
+    <resource-profile name="Legacy-FullTunnel" type="vpn-tunneling">
+      <resource>10.0.0.0/8</resource>
+      <autopolicies>
+        <policy action="allow">
+          <resource>10.0.0.0/8</resource>
+        </policy>
+      </autopolicies>
+      <roles>
+        <role name="Employees-Full"/>
+      </roles>
+    </resource-profile>
+
+  </resource-profiles>
+
+  <!-- Network Connect ACLs (Users > Resource Policies > Network Connect):
+       full-tunnel, subnet/CIDR-based rules, confirmed against a real
+       operator-provided export to be structurally different from a
+       Resource Profile above. Converted one Private App PER RESOURCE
+       (an NPA app is one host) — see mapper.py's build_migration_plan(). -->
+  <users>
+    <resource-policies>
+      <network-connect-policies>
+        <network-connect-acls>
+
+          <!-- Single resource -> one app, named after the ACL directly. -->
+          <network-connect-acl>
+            <name>vpn-jumpbox01-rdp</name>
+            <resource>tcp://10.30.4.15:3389</resource>
+            <roles>Employees-Full</roles>
+            <action>allow</action>
+          </network-connect-acl>
+
+          <!-- Multiple resources (one plain CIDR:*, one tcp://-prefixed
+               CIDR with a specific port list) -> numbered apps
+               "dc-subnet-access-1"/"-2", both granted by the same
+               role-based policies. -->
+          <network-connect-acl>
+            <name>dc-subnet-access</name>
+            <resource>10.30.0.0/16:*</resource>
+            <resource>tcp://10.31.0.0/20:80,443</resource>
+            <roles>Employees-Full</roles>
+            <roles>Partner-LimitedAccess</roles>
+            <action>allow</action>
+          </network-connect-acl>
+
+          <!-- action=deny -> a companion BLOCK policy instead of feeding
+               the normal allow-policy pipeline (mirrors the Finance-App-DB
+               deny-autopolicy handling above). -->
+          <network-connect-acl>
+            <name>legacy-telnet-block</name>
+            <resource>tcp://10.30.4.20:23</resource>
+            <roles>Employees-Contractors</roles>
+            <action>deny</action>
+          </network-connect-acl>
+
+        </network-connect-acls>
+      </network-connect-policies>
+    </resource-policies>
+  </users>
+
+</connect-secure-config>
